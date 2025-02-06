@@ -1,4 +1,7 @@
-flask
-python-dotenv
-requests
-pytest 
+streamlit
+plotly
+pandas
+numpy
+scikit-learn
+xgboost
+sqlite3

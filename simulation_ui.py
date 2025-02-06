@@ -7,6 +7,8 @@ import time
 from queue import PriorityQueue
 import numpy as np
 import delay_prediction
+import json
+from gate_storage import init_db, save_gate_assignment, get_gate_assignments, clear_db
 
 def format_time(minutes):
     """Convert minutes since midnight to HH:MM format"""
@@ -292,8 +294,24 @@ def assign_available_gates(assignments, current_time, gates_df):
             scheduled_arrival_mins = convert_hhmm_to_minutes(flight_dict['CRS_ARR_TIME'])
             actual_arrival_mins = scheduled_arrival_mins + max(0, flight_dict['ARR_DELAY'])
             
-            # Calculate wait time (time between actual arrival and gate assignment)
+            # Calculate wait time
             wait_time = max(0, current_time - actual_arrival_mins)
+            
+            # Initialize gate_assignments if it doesn't exist
+            if 'gate_assignments' not in st.session_state:
+                st.session_state.gate_assignments = {}
+            
+            # Store gate assignment
+            flight_key = flight_dict['CRS_DEP_TIME']
+            gate_info = {
+                'gate_number': gate['gate_number'],
+                'actual_arrival_time': current_time,
+                'wait_time': wait_time,
+                'status': 'occupied',
+                'occupied_until': current_time + 60
+            }
+            
+            save_gate_assignment(flight_key, gate_info)
             
             # Update flight assignment
             flight_update = {
@@ -303,7 +321,7 @@ def assign_available_gates(assignments, current_time, gates_df):
                 'wait_time': wait_time
             }
             
-            # Remove from queued flights set when assigned
+            # Remove from queued flights set
             st.session_state.queued_flights.remove(flight_dict['CRS_DEP_TIME'])
             assignments_made.append((flight_dict['CRS_DEP_TIME'], flight_update))
             
@@ -459,6 +477,9 @@ def get_top_waiting_flights(n=5):
 def main():
     st.set_page_config(page_title="Airport Gate Assignment Simulation", layout="wide")
     
+    # Initialize the database
+    init_db()
+    
     # Add page selection
     page = st.sidebar.radio("Select Page", ["Gate Simulation", "Delay Prediction"])
     
@@ -545,8 +566,19 @@ def run_simulation():
             st.session_state.current_time += st.session_state.time_step
     with col4:
         if st.button('🔄 Reset'):
+            # Clear database
+            clear_db()
+            # Reset simulation state
             st.session_state.current_time = st.session_state.assignments['actual_arrival_time'].min()
             st.session_state.running = False
+            # Clear queue
+            st.session_state.queued_flights = set()
+            st.session_state.priority_queue = create_priority_queue(st.session_state.assignments)
+            # Reset assignments
+            st.session_state.assignments['actual_arrival_time'] = pd.NA
+            st.session_state.assignments['gate_number'] = pd.NA
+            st.session_state.assignments['gate_distance'] = pd.NA
+            st.session_state.assignments['wait_time'] = pd.NA
     
     # Create gate status visualization
     gate_status = create_gate_visualization(
@@ -582,6 +614,12 @@ def run_simulation():
     if (st.session_state.running or st.session_state.auto_advance) and \
        st.session_state.current_time < st.session_state.max_time:
         
+        # Update current time file
+        update_current_time(st.session_state.current_time)
+        
+        # Update gate statuses
+        update_gate_statuses(st.session_state.current_time)
+        
         # Update priority queue with newly arrived flights
         update_priority_queue(st.session_state.assignments, st.session_state.current_time)
         
@@ -608,6 +646,57 @@ def run_simulation():
         time.sleep(1 / simulation_speed)
         st.session_state.current_time += st.session_state.time_step
         st.rerun()
+
+def update_gate_statuses(current_time):
+    """Update status and remaining time for all gate assignments"""
+    try:
+        # Get all current assignments
+        assignments = get_gate_assignments()
+        
+        # Update each assignment
+        for flight_key, gate_info in assignments.items():
+            # Update status based on current time
+            if gate_info['occupied_until'] <= current_time:
+                gate_info['status'] = 'departed'  # Changed from 'available' to 'departed'
+            elif gate_info['actual_arrival_time'] <= current_time:
+                gate_info['status'] = 'occupied'
+            
+            # Save the updated info back to storage
+            save_gate_assignment(flight_key, gate_info)
+            
+    except Exception as e:
+        st.error(f"Error updating gate statuses: {e}")
+
+def assign_gates(flights_df):
+    # Create a dictionary to store gate assignment details
+    gate_assignments = {}
+    current_time = pd.Timestamp.now()
+    
+    for idx, flight in flights_df.iterrows():
+        wait_time = 0
+        assigned_gate = None
+        
+        # Your existing gate assignment logic here
+        # ... existing code ...
+        
+        # Store the assignment details
+        gate_assignments[flight['flight_number']] = {
+            'gate': assigned_gate,
+            'assignment_time': current_time,
+            'wait_time': wait_time
+        }
+    
+    # Store in session state
+    st.session_state['gate_assignments'] = gate_assignments
+    return gate_assignments
+
+def update_current_time(current_time):
+    """Save current simulation time to file"""
+    try:
+        with open('current_time.txt', 'w') as f:
+            f.write(str(current_time))
+    except Exception as e:
+        st.error(f"Error saving current time: {e}")
 
 if __name__ == "__main__":
     main() 

@@ -1,6 +1,8 @@
 import pandas as pd
 from datetime import datetime, timedelta
 from collections import deque
+import time
+import streamlit as st
 
 def convert_time_to_minutes(time_str):
     """Convert time in HHMM format to minutes since midnight"""
@@ -124,7 +126,32 @@ class GateAssignment:
                 'wait_time': None
             })
         
-        return pd.DataFrame(assignments)
+        # Create a dictionary to store gate assignment details
+        gate_assignments = {}
+        current_time = pd.Timestamp.now()
+        
+        for idx, flight in flights_df.iterrows():
+            wait_time = 0
+            assigned_gate = None
+            
+            # Store the assignment details
+            gate_assignments[flight['flight_number']] = {
+                'gate': assigned_gate,
+                'assignment_time': current_time,
+                'wait_time': wait_time
+            }
+        
+        # Store in session state
+        st.session_state['gate_assignments'] = gate_assignments
+        return gate_assignments
+
+    def assign_gate(self, flight):
+        start_time = time.time()
+        # Find an available gate
+        assigned_gate = self.find_closest_available_gate(flight['arrival_time'])
+        
+        wait_time = int((time.time() - start_time) * 60)  # Convert to minutes
+        return assigned_gate, wait_time
 
 def main():
     # Read the preprocessed CSV file
